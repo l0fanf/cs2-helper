@@ -17,6 +17,9 @@ import gzip
 import time
 import webbrowser
 import traceback  # 新增：用于获取详细错误堆栈
+import sys
+from collections import deque
+from datetime import datetime
 
 # --- 依赖检测 ---
 HAS_OPENAI = False
@@ -84,6 +87,13 @@ C_BORDER = "#242424"
 C_BORDER_GOLD = "#3a2f12"
 C_T_SIDE = "#E8B976"   
 C_CT_SIDE = "#6BA4FF"  
+C_NEON_BLUE = "#63a9ff"
+C_NEON_PURPLE = "#8f6bff"
+C_PANEL = "#101010"
+C_PANEL_HIGHLIGHT = "#1d1d1d"
+C_STATUS_GREEN = "#2bd66e"
+C_STATUS_YELLOW = "#f2c94c"
+C_STATUS_RED = "#ff5c5c"
 
 # Pygame RGB
 PYGAME_C_T = (232, 185, 118)
@@ -95,6 +105,7 @@ FONT_H1 = ("Helvetica", 24, "bold")
 FONT_H2 = ("Helvetica", 16, "bold")
 FONT_BODY = ("Helvetica", 13)
 FONT_MONO = ("Consolas", 11)
+FONT_CHIP = ("Helvetica", 10, "bold")
 
 # --- 2D Radar 资源 ---
 # 说明：旧版 2D demo 坐标体系（MAP_RADAR_DATA + 线性换算）已废弃并删除。
@@ -149,7 +160,35 @@ LANG = {
         "download_map": "Downloading Map Radar...",
         "err_pygame": "Pygame Library Missing. Install with: pip install pygame",
         "download_failed": "Download failed. Open Faceit Match Room?",
-        "manual_guide": "Manual Mode: Download .dem file from Faceit, put into /downloads/ folder, or select it manually in Timeline tab."
+        "manual_guide": "Manual Mode: Download .dem file from Faceit, put into /downloads/ folder, or select it manually in Timeline tab.",
+        "hero_title": "Flow State Command Center",
+        "hero_subtitle": "Commercial-grade match intelligence with real-time telemetry.",
+        "header_sub": "Neural Ops Center",
+        "quick_actions": "Quick Actions",
+        "action_import": "Import Demo",
+        "action_export": "Export Report",
+        "action_open_downloads": "Open Downloads",
+        "action_open_cs2": "Open CS2 Folder",
+        "action_update": "Check Updates",
+        "perf_matrix": "Performance Matrix",
+        "perf_aim": "Aim Precision",
+        "perf_impact": "Impact",
+        "perf_util": "Utility Usage",
+        "perf_tempo": "Tempo Control",
+        "recent_activity": "Recent Activity",
+        "session_status": "Session Status",
+        "session_matches": "Matches",
+        "session_last": "Last Update",
+        "stat_kd": "K/D Ratio",
+        "stat_hs": "Headshot %",
+        "stat_rating": "Impact Rating",
+        "cta_focus": "Focus Mode",
+        "cta_autosync": "Auto Sync",
+        "cta_smart": "Smart Tips",
+        "cta_guard": "Integrity Guard",
+        "status_online": "Online",
+        "status_sync": "Cloud Sync",
+        "status_license": "License"
     },
     "zh": {
         "start": "开启心流分析",
@@ -181,7 +220,35 @@ LANG = {
         "download_map": "正在下载地图雷达...",
         "err_pygame": "缺少 Pygame 库，请安装：pip install pygame",
         "download_failed": "自动下载失败。是否打开 Faceit 网页手动下载 Demo？",
-        "manual_guide": "手动说明：在网页下载 Demo 后，将 .dem 文件放入 downloads 文件夹，或在 [时间轴] 页面手动选择该文件进行分析。"
+        "manual_guide": "手动说明：在网页下载 Demo 后，将 .dem 文件放入 downloads 文件夹，或在 [时间轴] 页面手动选择该文件进行分析。",
+        "hero_title": "心流指挥中枢",
+        "hero_subtitle": "商业级对局情报与实时遥测中心。",
+        "header_sub": "神经指挥中心",
+        "quick_actions": "快捷操作",
+        "action_import": "导入 Demo",
+        "action_export": "导出报告",
+        "action_open_downloads": "打开下载目录",
+        "action_open_cs2": "打开 CS2 目录",
+        "action_update": "检查更新",
+        "perf_matrix": "性能矩阵",
+        "perf_aim": "准星精准",
+        "perf_impact": "影响力",
+        "perf_util": "道具效率",
+        "perf_tempo": "节奏控制",
+        "recent_activity": "最近动态",
+        "session_status": "会话状态",
+        "session_matches": "解析场次",
+        "session_last": "最近更新",
+        "stat_kd": "K/D 比",
+        "stat_hs": "爆头率",
+        "stat_rating": "影响力",
+        "cta_focus": "专注模式",
+        "cta_autosync": "自动同步",
+        "cta_smart": "智能提示",
+        "cta_guard": "安全防护",
+        "status_online": "在线",
+        "status_sync": "云同步",
+        "status_license": "许可"
     }
 }
 
@@ -887,6 +954,9 @@ class App(ctk.CTk):
         self.cached_matches = [] 
         self.replay_map_name = "de_mirage"
         self.replay_map_file = None
+        self.session_matches = 0
+        self.last_update_time = None
+        self.activity_log = deque(maxlen=6)
         self.title(APP_NAME)
         self.geometry("1280x850")
         ctk.set_appearance_mode("Dark")
@@ -900,6 +970,8 @@ class App(ctk.CTk):
         ctk.CTkLabel(self.nav, text="PRO", font=("Helvetica", 10, "bold"), text_color="black", fg_color=C_PRO_GOLD, corner_radius=4).place(x=160, y=55)
         self.bind("<Motion>", self.on_mouse_move)
         self.animate_loop()
+        self.update_clock()
+        self.log_activity("Dashboard ready")
 
     def destroy(self):
         self.running = False
@@ -940,8 +1012,21 @@ class App(ctk.CTk):
         self.content.grid_rowconfigure(1, weight=1)
         header_frame = ctk.CTkFrame(self.content, fg_color="transparent", height=100)
         header_frame.grid(row=0, column=0, sticky="ew", padx=40, pady=(40, 20))
-        self.lbl_header = ctk.CTkLabel(header_frame, text="Ready.", font=FONT_HERO, text_color=C_DIM, anchor="w")
-        self.lbl_header.pack(side="left")
+        header_left = ctk.CTkFrame(header_frame, fg_color="transparent")
+        header_left.pack(side="left", fill="both", expand=True)
+        self.lbl_header = ctk.CTkLabel(header_left, text="Ready.", font=FONT_HERO, text_color=C_DIM, anchor="w")
+        self.lbl_header.pack(anchor="w")
+        self.lbl_header_sub = ctk.CTkLabel(header_left, text=LANG[self.lang]["header_sub"], font=("Helvetica", 14), text_color=C_DIM, anchor="w")
+        self.lbl_header_sub.pack(anchor="w", pady=(6, 0))
+        header_right = ctk.CTkFrame(header_frame, fg_color="transparent")
+        header_right.pack(side="right")
+        chip_row = ctk.CTkFrame(header_right, fg_color="transparent")
+        chip_row.pack(anchor="e", pady=(0, 8))
+        self.lbl_status_online = self.create_chip(chip_row, f"● {LANG[self.lang]['status_online']}", C_STATUS_GREEN)
+        self.lbl_status_sync = self.create_chip(chip_row, LANG[self.lang]["status_sync"], C_NEON_BLUE)
+        self.lbl_status_license = self.create_chip(chip_row, f"{LANG[self.lang]['status_license']}: PRO", C_GOLD_SOFT)
+        self.lbl_clock = ctk.CTkLabel(header_right, text="", font=FONT_MONO, text_color=C_DIM)
+        self.lbl_clock.pack(anchor="e")
         self.pages_frame = ctk.CTkFrame(self.content, fg_color="transparent")
         self.pages_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=0)
         self.pages = {
@@ -958,6 +1043,21 @@ class App(ctk.CTk):
         self.build_util_page(self.pages["tab_util"])
         self.build_ai_page(self.pages["tab_ai"])
         self.show_page("tab_dash")
+
+    def create_chip(self, parent, text, color):
+        chip = ctk.CTkFrame(parent, fg_color=C_PANEL_HIGHLIGHT, corner_radius=14, border_width=1, border_color=C_BORDER)
+        chip.pack(side="left", padx=4)
+        lbl = ctk.CTkLabel(chip, text=text, font=FONT_CHIP, text_color=color)
+        lbl.pack(padx=10, pady=4)
+        return lbl
+
+    def update_clock(self):
+        if not getattr(self, 'running', False) or not self.winfo_exists():
+            return
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if hasattr(self, "lbl_clock"):
+            self.lbl_clock.configure(text=now)
+        self.after(1000, self.update_clock)
 
     def create_nav_btn(self, key, text, active=False):
         btn_frame = ctk.CTkFrame(self.nav, fg_color="transparent")
@@ -1203,22 +1303,180 @@ class App(ctk.CTk):
     def build_dashboard(self, parent):
         container = ctk.CTkFrame(parent, fg_color="transparent")
         container.pack(expand=True, fill="both")
-        self.btn_start = ctk.CTkButton(container, text=LANG[self.lang]["start"], font=("Helvetica", 18, "bold"), height=80, width=240, corner_radius=40, fg_color=C_HIGHLIGHT, text_color="#000", hover_color="#ddd", command=lambda: self.run_thread(self.analyze_core))
-        self.btn_start.pack(pady=(60, 60))
+
+        hero = ctk.CTkFrame(container, fg_color=C_GLASS_2, corner_radius=28, border_width=1, border_color=C_BORDER_GOLD)
+        hero.pack(fill="x", padx=10, pady=(0, 24))
+        hero.grid_columnconfigure(0, weight=1)
+        hero.grid_columnconfigure(1, weight=0)
+        hero_left = ctk.CTkFrame(hero, fg_color="transparent")
+        hero_left.grid(row=0, column=0, sticky="nsew", padx=30, pady=30)
+        self.lbl_dash_title = ctk.CTkLabel(hero_left, text=LANG[self.lang]["hero_title"], font=("Helvetica", 28, "bold"), text_color=C_HIGHLIGHT, anchor="w")
+        self.lbl_dash_title.pack(anchor="w")
+        self.lbl_dash_sub = ctk.CTkLabel(hero_left, text=LANG[self.lang]["hero_subtitle"], font=("Helvetica", 13), text_color=C_DIM, anchor="w")
+        self.lbl_dash_sub.pack(anchor="w", pady=(8, 20))
+        toggles = ctk.CTkFrame(hero_left, fg_color="transparent")
+        toggles.pack(anchor="w")
+        self.switch_focus_var = tk.BooleanVar(value=True)
+        self.switch_sync_var = tk.BooleanVar(value=True)
+        self.switch_smart_var = tk.BooleanVar(value=True)
+        self.switch_guard_var = tk.BooleanVar(value=True)
+        self.switch_focus = ctk.CTkSwitch(toggles, text=LANG[self.lang]["cta_focus"], variable=self.switch_focus_var, command=lambda: self.toggle_feature("Focus", self.switch_focus_var.get()))
+        self.switch_sync = ctk.CTkSwitch(toggles, text=LANG[self.lang]["cta_autosync"], variable=self.switch_sync_var, command=lambda: self.toggle_feature("Sync", self.switch_sync_var.get()))
+        self.switch_smart = ctk.CTkSwitch(toggles, text=LANG[self.lang]["cta_smart"], variable=self.switch_smart_var, command=lambda: self.toggle_feature("Smart Tips", self.switch_smart_var.get()))
+        self.switch_guard = ctk.CTkSwitch(toggles, text=LANG[self.lang]["cta_guard"], variable=self.switch_guard_var, command=lambda: self.toggle_feature("Integrity", self.switch_guard_var.get()))
+        for sw in (self.switch_focus, self.switch_sync, self.switch_smart, self.switch_guard):
+            sw.pack(side="left", padx=(0, 20))
+
+        hero_right = ctk.CTkFrame(hero, fg_color="transparent")
+        hero_right.grid(row=0, column=1, sticky="e", padx=30, pady=30)
+        self.btn_start = ctk.CTkButton(hero_right, text=LANG[self.lang]["start"], font=("Helvetica", 18, "bold"), height=64, width=220, corner_radius=32, fg_color=C_HIGHLIGHT, text_color="#000", hover_color="#ddd", command=lambda: self.run_thread(self.analyze_core))
+        self.btn_start.pack(pady=(0, 16))
+        self.btn_import_demo = ctk.CTkButton(hero_right, text=LANG[self.lang]["action_import"], width=220, height=40, corner_radius=20, fg_color=C_PANEL_HIGHLIGHT, hover_color=C_SURFACE_HOVER, command=self.select_demo_file)
+        self.btn_import_demo.pack()
+
+        actions = ctk.CTkFrame(container, fg_color="transparent")
+        actions.pack(fill="x", padx=10, pady=(0, 24))
+        self.lbl_quick_actions = ctk.CTkLabel(actions, text=LANG[self.lang]["quick_actions"], font=("Helvetica", 16, "bold"), text_color=C_HIGHLIGHT)
+        self.lbl_quick_actions.pack(anchor="w", pady=(0, 10))
+        action_row = ctk.CTkFrame(actions, fg_color="transparent")
+        action_row.pack(fill="x")
+        self.btn_export_report = self.create_action_btn(action_row, LANG[self.lang]["action_export"], self.export_report, C_NEON_PURPLE)
+        self.btn_open_downloads = self.create_action_btn(action_row, LANG[self.lang]["action_open_downloads"], self.open_downloads_folder, C_NEON_BLUE)
+        self.btn_open_cs2 = self.create_action_btn(action_row, LANG[self.lang]["action_open_cs2"], self.open_cs2_folder, C_FACEIT_ORANGE)
+        self.btn_check_updates = self.create_action_btn(action_row, LANG[self.lang]["action_update"], lambda: webbrowser.open("https://www.counter-strike.net/"), C_PRO_GOLD)
+
         grid = ctk.CTkFrame(container, fg_color="transparent")
-        grid.pack(fill="x", padx=20)
-        grid.grid_columnconfigure((0,1,2), weight=1)
-        self.lbl_kd = self.create_stat(grid, "K/D RATIO", "0.00", 0)
-        self.lbl_hs = self.create_stat(grid, "HEADSHOT %", "0%", 1)
-        self.lbl_rating = self.create_stat(grid, "IMPACT RATING", "0.00", 2)
-    def create_stat(self, parent, title, val, col):
-        f = ctk.CTkFrame(parent, fg_color="#181818", corner_radius=24, height=150)
+        grid.pack(fill="x", padx=10, pady=(0, 24))
+        grid.grid_columnconfigure((0, 1, 2), weight=1)
+        self.stat_title_labels = {}
+        self.lbl_kd = self.create_stat(grid, LANG[self.lang]["stat_kd"], "0.00", 0, C_NEON_BLUE, "⚔️", "kd")
+        self.lbl_hs = self.create_stat(grid, LANG[self.lang]["stat_hs"], "0%", 1, C_NEON_PURPLE, "🎯", "hs")
+        self.lbl_rating = self.create_stat(grid, LANG[self.lang]["stat_rating"], "0.00", 2, C_FACEIT_ORANGE, "🚀", "impact")
+
+        lower_grid = ctk.CTkFrame(container, fg_color="transparent")
+        lower_grid.pack(fill="both", expand=True, padx=10)
+        lower_grid.grid_columnconfigure((0, 1), weight=1)
+        lower_grid.grid_rowconfigure(0, weight=1)
+
+        perf_card = ctk.CTkFrame(lower_grid, fg_color=C_PANEL, corner_radius=24, border_width=1, border_color=C_BORDER)
+        perf_card.grid(row=0, column=0, sticky="nsew", padx=(0, 12), pady=0)
+        self.lbl_perf_title = ctk.CTkLabel(perf_card, text=LANG[self.lang]["perf_matrix"], font=("Helvetica", 16, "bold"), text_color=C_HIGHLIGHT)
+        self.lbl_perf_title.pack(anchor="w", padx=24, pady=(20, 10))
+        self.perf_bars = {}
+        self.perf_labels = {}
+        for name, key, color in [
+            (LANG[self.lang]["perf_aim"], "aim", C_NEON_BLUE),
+            (LANG[self.lang]["perf_impact"], "impact", C_FACEIT_ORANGE),
+            (LANG[self.lang]["perf_util"], "util", C_NEON_PURPLE),
+            (LANG[self.lang]["perf_tempo"], "tempo", C_ACCENT_2),
+        ]:
+            row = ctk.CTkFrame(perf_card, fg_color="transparent")
+            row.pack(fill="x", padx=24, pady=8)
+            lbl = ctk.CTkLabel(row, text=name, font=("Helvetica", 12, "bold"), text_color=C_DIM)
+            lbl.pack(side="left")
+            bar = ctk.CTkProgressBar(row, width=180, height=8, progress_color=color, fg_color=C_BORDER)
+            bar.pack(side="right", padx=(10, 0))
+            bar.set(0.1)
+            self.perf_bars[key] = bar
+            self.perf_labels[key] = lbl
+
+        activity_card = ctk.CTkFrame(lower_grid, fg_color=C_PANEL, corner_radius=24, border_width=1, border_color=C_BORDER)
+        activity_card.grid(row=0, column=1, sticky="nsew", padx=(12, 0), pady=0)
+        self.lbl_activity_title = ctk.CTkLabel(activity_card, text=LANG[self.lang]["recent_activity"], font=("Helvetica", 16, "bold"), text_color=C_HIGHLIGHT)
+        self.lbl_activity_title.pack(anchor="w", padx=24, pady=(20, 10))
+        self.activity_labels = []
+        for _ in range(6):
+            lbl = ctk.CTkLabel(activity_card, text="• —", font=("Helvetica", 12), text_color=C_DIM, anchor="w")
+            lbl.pack(anchor="w", padx=24, pady=4)
+            self.activity_labels.append(lbl)
+
+        session_card = ctk.CTkFrame(activity_card, fg_color="transparent")
+        session_card.pack(fill="x", padx=24, pady=(16, 20))
+        self.lbl_session_title = ctk.CTkLabel(session_card, text=LANG[self.lang]["session_status"], font=("Helvetica", 13, "bold"), text_color=C_HIGHLIGHT)
+        self.lbl_session_title.pack(anchor="w", pady=(0, 8))
+        self.lbl_session_matches = ctk.CTkLabel(session_card, text=f"{LANG[self.lang]['session_matches']}: 0", font=("Helvetica", 12), text_color=C_DIM)
+        self.lbl_session_matches.pack(anchor="w")
+        self.lbl_session_last = ctk.CTkLabel(session_card, text=f"{LANG[self.lang]['session_last']}: —", font=("Helvetica", 12), text_color=C_DIM)
+        self.lbl_session_last.pack(anchor="w", pady=(4, 0))
+
+    def create_action_btn(self, parent, text, command, accent):
+        btn = ctk.CTkButton(parent, text=text, height=42, corner_radius=20, fg_color=C_PANEL_HIGHLIGHT, hover_color=C_SURFACE_HOVER, border_width=1, border_color=accent, command=command)
+        btn.pack(side="left", padx=6, fill="x", expand=True)
+        return btn
+
+    def create_stat(self, parent, title, val, col, accent, icon, key):
+        f = ctk.CTkFrame(parent, fg_color=C_PANEL, corner_radius=24, height=150, border_width=1, border_color=C_BORDER)
         f.grid(row=0, column=col, padx=10, sticky="ew")
         f.grid_propagate(False)
-        ctk.CTkLabel(f, text=title, font=("Helvetica", 11, "bold"), text_color="#555").pack(pady=(30, 10))
-        lbl = ctk.CTkLabel(f, text=val, font=("Helvetica", 42, "bold"), text_color=C_HIGHLIGHT)
-        lbl.pack(pady=(0, 20))
+        header = ctk.CTkFrame(f, fg_color="transparent")
+        header.pack(fill="x", padx=18, pady=(18, 6))
+        ctk.CTkLabel(header, text=icon, font=("Helvetica", 16), text_color=accent).pack(side="left")
+        title_lbl = ctk.CTkLabel(header, text=title, font=("Helvetica", 11, "bold"), text_color=C_DIM)
+        title_lbl.pack(side="left", padx=8)
+        self.stat_title_labels[key] = title_lbl
+        lbl = ctk.CTkLabel(f, text=val, font=("Helvetica", 36, "bold"), text_color=C_HIGHLIGHT)
+        lbl.pack(pady=(8, 20))
         return lbl
+
+    def log_activity(self, message):
+        timestamp = datetime.now().strftime("%H:%M")
+        entry = f"• [{timestamp}] {message}"
+        self.activity_log.appendleft(entry)
+        if hasattr(self, "activity_labels"):
+            for idx, lbl in enumerate(self.activity_labels):
+                text = self.activity_log[idx] if idx < len(self.activity_log) else "• —"
+                lbl.configure(text=text)
+
+    def toggle_feature(self, name, enabled):
+        state = "ON" if enabled else "OFF"
+        self.notify(f"{name} {state}", C_ACCENT_2 if enabled else C_ACCENT_1)
+        self.log_activity(f"{name} switched {state}")
+
+    def select_demo_file(self):
+        path = filedialog.askopenfilename(filetypes=[("CS2 Demo", "*.dem")])
+        if path:
+            self.current_demo_path = path
+            self.notify("Demo loaded", C_ACCENT_2)
+            self.log_activity(f"Demo selected: {os.path.basename(path)}")
+        else:
+            self.notify("No demo selected", C_ACCENT_1)
+
+    def open_downloads_folder(self):
+        self.open_folder(os.path.join(os.getcwd(), "downloads"))
+
+    def open_cs2_folder(self):
+        if not self.cs2_path:
+            return self.notify("CS2 path missing", C_ACCENT_1)
+        if os.path.isfile(self.cs2_path):
+            self.open_folder(os.path.dirname(self.cs2_path))
+        else:
+            self.open_folder(self.cs2_path)
+
+    def export_report(self):
+        if not self.match_data:
+            return self.notify("No report to export", C_ACCENT_1)
+        save_path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON", "*.json")])
+        if not save_path:
+            return
+        with open(save_path, "w", encoding="utf-8") as f:
+            json.dump(self.match_data, f, ensure_ascii=False, indent=2)
+        self.notify("Report exported", C_ACCENT_2)
+        self.log_activity(f"Report exported: {os.path.basename(save_path)}")
+
+    def open_folder(self, path):
+        if not path or not os.path.exists(path):
+            return self.notify("Folder not found", C_ACCENT_1)
+        try:
+            if os.name == "nt":
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+            self.notify("Opened folder", C_ACCENT_2)
+            self.log_activity(f"Opened: {path}")
+        except Exception as e:
+            self.notify(f"Open failed: {e}", C_ACCENT_1)
     def build_faceit_page(self, parent):
         inp = ctk.CTkFrame(parent, fg_color="transparent")
         inp.pack(fill="x", pady=20)
@@ -1252,6 +1510,12 @@ class App(ctk.CTk):
         try:
             if "..." in self.lbl_header.cget("text") or "Ready" in self.lbl_header.cget("text"): self.lbl_header.configure(text_color=f"#{val:02x}{val:02x}{val:02x}")
         except: pass
+        try:
+            pulse = int(200 + 30 * math.sin(self.anim_t * 1.8))
+            if hasattr(self, "btn_start"):
+                self.btn_start.configure(fg_color=f"#{pulse:02x}{pulse:02x}{pulse:02x}", hover_color="#ffffff", text_color="#000")
+        except Exception:
+            pass
         if self.running: self.after(50, self.animate_loop)
 
     def cascade_load_rounds(self, cards, index=0):
@@ -1289,6 +1553,65 @@ class App(ctk.CTk):
         d = LANG[self.lang]
         for k, v in self.btn_tabs.items(): v["btn"].configure(text=d[k])
         self.btn_start.configure(text=d["start"]); self.btn_ai_gen.configure(text=d["ai_gen"]); self.btn_faceit_link.configure(text=d["faceit_link"]); self.entry_faceit.configure(placeholder_text=d["faceit_placeholder"]); self.combo_map.set(d["filter_map"]); self.combo_res.set(d["filter_res"]); self.combo_util_map.set(d["util_sel"]); self.btn_launch_replay.configure(text=d["load_replay"])
+        if hasattr(self, "lbl_header_sub"):
+            self.lbl_header_sub.configure(text=d["header_sub"])
+        if hasattr(self, "lbl_dash_title"):
+            self.lbl_dash_title.configure(text=d["hero_title"])
+        if hasattr(self, "lbl_dash_sub"):
+            self.lbl_dash_sub.configure(text=d["hero_subtitle"])
+        if hasattr(self, "lbl_quick_actions"):
+            self.lbl_quick_actions.configure(text=d["quick_actions"])
+        if hasattr(self, "btn_import_demo"):
+            self.btn_import_demo.configure(text=d["action_import"])
+        if hasattr(self, "btn_export_report"):
+            self.btn_export_report.configure(text=d["action_export"])
+        if hasattr(self, "btn_open_downloads"):
+            self.btn_open_downloads.configure(text=d["action_open_downloads"])
+        if hasattr(self, "btn_open_cs2"):
+            self.btn_open_cs2.configure(text=d["action_open_cs2"])
+        if hasattr(self, "btn_check_updates"):
+            self.btn_check_updates.configure(text=d["action_update"])
+        if hasattr(self, "stat_title_labels"):
+            if "kd" in self.stat_title_labels:
+                self.stat_title_labels["kd"].configure(text=d["stat_kd"])
+            if "hs" in self.stat_title_labels:
+                self.stat_title_labels["hs"].configure(text=d["stat_hs"])
+            if "impact" in self.stat_title_labels:
+                self.stat_title_labels["impact"].configure(text=d["stat_rating"])
+        if hasattr(self, "lbl_perf_title"):
+            self.lbl_perf_title.configure(text=d["perf_matrix"])
+        if hasattr(self, "perf_labels"):
+            if "aim" in self.perf_labels:
+                self.perf_labels["aim"].configure(text=d["perf_aim"])
+            if "impact" in self.perf_labels:
+                self.perf_labels["impact"].configure(text=d["perf_impact"])
+            if "util" in self.perf_labels:
+                self.perf_labels["util"].configure(text=d["perf_util"])
+            if "tempo" in self.perf_labels:
+                self.perf_labels["tempo"].configure(text=d["perf_tempo"])
+        if hasattr(self, "lbl_activity_title"):
+            self.lbl_activity_title.configure(text=d["recent_activity"])
+        if hasattr(self, "lbl_session_title"):
+            self.lbl_session_title.configure(text=d["session_status"])
+        if hasattr(self, "lbl_session_matches"):
+            self.lbl_session_matches.configure(text=f"{d['session_matches']}: {self.session_matches}")
+        if hasattr(self, "lbl_session_last"):
+            last_text = self.last_update_time.strftime("%H:%M") if self.last_update_time else "—"
+            self.lbl_session_last.configure(text=f"{d['session_last']}: {last_text}")
+        if hasattr(self, "switch_focus"):
+            self.switch_focus.configure(text=d["cta_focus"])
+        if hasattr(self, "switch_sync"):
+            self.switch_sync.configure(text=d["cta_autosync"])
+        if hasattr(self, "switch_smart"):
+            self.switch_smart.configure(text=d["cta_smart"])
+        if hasattr(self, "switch_guard"):
+            self.switch_guard.configure(text=d["cta_guard"])
+        if hasattr(self, "lbl_status_online"):
+            self.lbl_status_online.configure(text=f"● {d['status_online']}")
+        if hasattr(self, "lbl_status_sync"):
+            self.lbl_status_sync.configure(text=d["status_sync"])
+        if hasattr(self, "lbl_status_license"):
+            self.lbl_status_license.configure(text=f"{d['status_license']}: PRO")
         self.notify(d["ready"] if self.match_data else "", C_DIM)
     def copy_ai(self):
         self.clipboard_clear(); self.clipboard_append(self.txt_ai.get("0.0", "end"))
@@ -1350,6 +1673,7 @@ class App(ctk.CTk):
                     durl = ""
                 self.cached_matches.append({"id": m['match_id'], "map": mn, "score": sc, "result": res, "kd": str(kd), "hs": str(hs), "demo_url": durl})
             self.apply_filters(); self.notify(f"Synced {len(self.cached_matches)} Matches", C_ACCENT_2)
+            self.log_activity(f"Faceit synced: {len(self.cached_matches)} matches")
         except Exception as e: self.notify(f"API Error: {e}", C_ACCENT_1)
 
     def apply_filters(self, event=None):
@@ -1390,6 +1714,7 @@ class App(ctk.CTk):
             except: continue
         if success:
             self.current_demo_path = dpath; self.analyze_core(override_path=dpath); self.show_page("tab_round")
+            self.log_activity(f"Downloaded demo {os.path.basename(dpath)}")
         else:
             self.notify("DL Failed", C_ACCENT_1)
             if messagebox.askyesno("Download Blocked", LANG[self.lang]["download_failed"]):
@@ -1417,6 +1742,7 @@ class App(ctk.CTk):
 
             self.current_demo_path = path
             self.notify(LANG[self.lang]["processing"], C_HIGHLIGHT)
+            self.log_activity(f"Analyzing {os.path.basename(path)}")
             for w in self.pages["tab_round"].winfo_children(): w.destroy()
             self.replay_data = None
             
@@ -1470,9 +1796,29 @@ class App(ctk.CTk):
                 cards_to_show.append((card, {"fill": "x", "pady": 6, "padx": 10}))
                 ai_rounds.append({"r": r, "k": k_count, "d": d_count, "tag": tag})
                 
-            self.lbl_kd.configure(text=f"{total_k / total_d if total_d > 0 else total_k:.2f}")
-            self.lbl_hs.configure(text=f"{(total_hs/total_k*100) if total_k>0 else 0:.1f}%")
-            self.match_data = {"id": tid, "rounds": ai_rounds, "stats": {"kd": total_k/total_d if total_d > 0 else total_k}}
+            kd_ratio = total_k / total_d if total_d > 0 else total_k
+            hs_pct = (total_hs / total_k * 100) if total_k > 0 else 0
+            impact_rating = min(2.8, (kd_ratio * 0.7 + (hs_pct / 100) * 0.6) * 1.5)
+            self.lbl_kd.configure(text=f"{kd_ratio:.2f}")
+            self.lbl_hs.configure(text=f"{hs_pct:.1f}%")
+            self.lbl_rating.configure(text=f"{impact_rating:.2f}")
+            self.match_data = {"id": tid, "rounds": ai_rounds, "stats": {"kd": kd_ratio, "hs": hs_pct, "impact": impact_rating}}
+            if hasattr(self, "perf_bars"):
+                rounds_count = max(1, max_r)
+                aim_score = min(1.0, hs_pct / 100)
+                impact_score = min(1.0, kd_ratio / 2)
+                util_score = min(1.0, (total_k / rounds_count) / 1.2)
+                tempo_score = min(1.0, ((total_k + total_d) / rounds_count) / 2.0)
+                self.perf_bars["aim"].set(aim_score)
+                self.perf_bars["impact"].set(impact_score)
+                self.perf_bars["util"].set(util_score)
+                self.perf_bars["tempo"].set(tempo_score)
+            if hasattr(self, "lbl_session_matches"):
+                self.session_matches += 1
+                self.lbl_session_matches.configure(text=f"{LANG[self.lang]['session_matches']}: {self.session_matches}")
+                self.last_update_time = datetime.now()
+                self.lbl_session_last.configure(text=f"{LANG[self.lang]['session_last']}: {self.last_update_time.strftime('%H:%M')}")
+            self.log_activity("Analysis completed")
             if not override_path: self.show_page("tab_round")
             self.after(100, lambda: self.cascade_load_rounds(cards_to_show))
             
